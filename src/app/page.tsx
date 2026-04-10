@@ -208,8 +208,8 @@ export default function Page() {
 
   if (stage === 'input') {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-purple-100 via-pink-50 to-amber-50 px-5 py-10">
-        <div className="mx-auto max-w-md">
+      <main className="min-h-screen overflow-x-hidden bg-gradient-to-b from-purple-100 via-pink-50 to-amber-50 px-4 py-10">
+        <div className="mx-auto w-full max-w-md">
           <div className="mb-8 text-center">
             <div className="mb-3 text-5xl">🔮✨</div>
             <h1 className="text-3xl font-extrabold text-purple-900">사주 &amp; 별자리</h1>
@@ -220,7 +220,7 @@ export default function Page() {
 
           <form
             onSubmit={handleSubmit}
-            className="space-y-5 rounded-3xl bg-white/80 p-6 shadow-xl ring-1 ring-purple-100 backdrop-blur"
+            className="w-full space-y-5 rounded-3xl bg-white/80 p-5 shadow-xl ring-1 ring-purple-100 backdrop-blur"
           >
             <div>
               <label className="mb-2 block text-xs font-semibold text-purple-700">
@@ -233,7 +233,7 @@ export default function Page() {
                 max="2099-12-31"
                 value={birthDate}
                 onChange={(e) => setBirthDate(e.target.value)}
-                className="w-full rounded-2xl border border-purple-100 bg-white px-4 py-3 text-base text-gray-800 focus:border-purple-400 focus:outline-none"
+                className="block w-full min-w-0 max-w-full appearance-none rounded-2xl border border-purple-100 bg-white px-4 py-3 text-base text-gray-800 focus:border-purple-400 focus:outline-none"
               />
             </div>
 
@@ -246,7 +246,7 @@ export default function Page() {
                 required
                 value={birthTime}
                 onChange={(e) => setBirthTime(e.target.value)}
-                className="w-full rounded-2xl border border-purple-100 bg-white px-4 py-3 text-base text-gray-800 focus:border-purple-400 focus:outline-none"
+                className="block w-full min-w-0 max-w-full appearance-none rounded-2xl border border-purple-100 bg-white px-4 py-3 text-base text-gray-800 focus:border-purple-400 focus:outline-none"
               />
               <p className="mt-1 text-[11px] text-purple-400">
                 시간 모르면 12:00 근처로 넣어봐 (시주·상승궁 정확도는 떨어짐)

@@ -17,3 +17,38 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo",
     "Noto Sans KR", sans-serif;
 }
+
+/* iOS Safari의 date/time 입력 네이티브 스타일이 컨테이너 밖으로 튀어나오는
+   문제 방지. -webkit-appearance:none 으로 자동 calendar 버튼 크기 계산 무력화. */
+input[type="date"],
+input[type="time"] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: block;
+}
+
+/* 값 텍스트가 박스 안에서 왼쪽 정렬되도록 */
+input[type="date"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value {
+  text-align: left;
+  min-height: 1.5em;
+}
+
+/* 달력 아이콘은 유지하되 컨테이너 안에 딱 맞춰서 */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  padding: 0;
+  margin-inline-start: 0.5rem;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+/* 가로 스크롤 방지 (최상위 방어선) */
+html,
+body {
+  overflow-x: hidden;
+}
