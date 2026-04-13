@@ -27,26 +27,44 @@ export async function* streamGemini(
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split('\n');
-    buffer = lines.pop()!;
-
+  function* parseLines(raw: string) {
+    const lines = raw.split('\n');
     for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6).trim();
+      const trimmed = line.trim();
+      if (trimmed.startsWith('data: ')) {
+        const data = trimmed.slice(6).trim();
         if (data === '[DONE]') return;
         try {
           const json = JSON.parse(data);
           const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
           if (text) yield text;
         } catch {
-          // skip malformed chunks
+          // skip malformed
         }
       }
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lastNewline = buffer.lastIndexOf('\n');
+    if (lastNewline === -1) continue; // 완전한 줄이 없으면 대기
+
+    const complete = buffer.slice(0, lastNewline);
+    buffer = buffer.slice(lastNewline + 1);
+
+    for (const text of parseLines(complete)) {
+      yield text;
+    }
+  }
+
+  // 마지막 버퍼에 남은 데이터 처리 (잘림 방지)
+  if (buffer.trim()) {
+    for (const text of parseLines(buffer)) {
+      yield text;
     }
   }
 }
