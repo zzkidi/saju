@@ -12,7 +12,8 @@ export async function* streamGemini(
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.85,
-        maxOutputTokens: 2048,
+        maxOutputTokens: 4096,
+        thinkingConfig: { thinkingBudget: 0 },
       },
     }),
   });

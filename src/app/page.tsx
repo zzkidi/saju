@@ -116,28 +116,33 @@ export default function Page() {
     setIsTyping(true);
 
     if (apiKey) {
-      // AI 페르소나
+      // AI 페르소나 — 타이핑 도트가 첫 글자까지 유지
       const personaPrompt = buildPrompt(sajuResult, astroResult, mbtiVal, gender, 'overall');
-      const personaMsg: Message = { kind: 'ai', text: '' };
-      setIsTyping(false);
-      setMessages((prev) => [...prev, personaMsg]);
       try {
+        let firstChunk = true;
         for await (const chunk of streamGemini(apiKey, personaPrompt)) {
-          setMessages((prev) => {
-            const updated = [...prev];
-            const last = updated[updated.length - 1];
-            updated[updated.length - 1] = { ...last, text: last.text + chunk };
-            return updated;
-          });
+          if (firstChunk) {
+            setIsTyping(false);
+            setMessages((prev) => [...prev, { kind: 'ai', text: chunk }]);
+            firstChunk = false;
+          } else {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              updated[updated.length - 1] = { ...last, text: last.text + chunk };
+              return updated;
+            });
+          }
+        }
+        if (firstChunk) {
+          setIsTyping(false);
+          const fallback = generateSajuPersona(sajuResult);
+          setMessages((prev) => [...prev, { kind: 'saju', text: fallback }]);
         }
       } catch {
-        // fallback
+        setIsTyping(false);
         const fallback = generateSajuPersona(sajuResult);
-        setMessages((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1] = { kind: 'saju', text: fallback };
-          return updated;
-        });
+        setMessages((prev) => [...prev, { kind: 'saju', text: fallback }]);
       }
     } else {
       await sleep(800);
@@ -170,34 +175,37 @@ export default function Page() {
     await sleep(400);
 
     if (apiKey) {
-      // AI 종합 해석
+      // AI 종합 해석 — 타이핑 도트가 첫 글자까지 유지
       setIsTyping(true);
-      await sleep(500);
-      setIsTyping(false);
       const prompt = buildPrompt(saju, astro, savedMbti, savedGender, cat);
-      const aiMsg: Message = { kind: 'ai', text: '' };
-      setMessages((prev) => [...prev, aiMsg]);
       try {
+        let firstChunk = true;
         for await (const chunk of streamGemini(apiKey, prompt)) {
-          setMessages((prev) => {
-            const updated = [...prev];
-            const last = updated[updated.length - 1];
-            updated[updated.length - 1] = { ...last, text: last.text + chunk };
-            return updated;
-          });
+          if (firstChunk) {
+            setIsTyping(false);
+            setMessages((prev) => [...prev, { kind: 'ai', text: chunk }]);
+            firstChunk = false;
+          } else {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              updated[updated.length - 1] = { ...last, text: last.text + chunk };
+              return updated;
+            });
+          }
         }
-      } catch (err) {
-        // fallback to static
+        if (firstChunk) {
+          setIsTyping(false);
+          setMessages((prev) => [...prev, { kind: 'ai', text: '(응답 없음 — 다시 시도해봐)' }]);
+        }
+      } catch {
+        setIsTyping(false);
         const fallbackSaju = generateSajuReading(saju, cat);
         const fallbackAstro = generateAstroReading(astro, cat);
-        setMessages((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1] = {
-            kind: 'saju',
-            text: `(AI 연결 실패, 기본 해석)\n\n🔮 ${fallbackSaju}\n\n✨ ${fallbackAstro}`,
-          };
-          return updated;
-        });
+        setMessages((prev) => [
+          ...prev,
+          { kind: 'saju', text: `(AI 연결 실패)\n\n🔮 ${fallbackSaju}\n\n✨ ${fallbackAstro}` },
+        ]);
       }
     } else {
       // 정적 fallback
