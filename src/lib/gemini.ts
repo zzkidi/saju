@@ -1,6 +1,71 @@
 const API_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent';
 
+export type GeminiMessage = {
+  role: 'user' | 'model';
+  parts: { text: string }[];
+};
+
+// 멀티턴 대화용 스트리밍
+export async function* streamGeminiChat(
+  apiKey: string,
+  systemPrompt: string,
+  history: GeminiMessage[]
+): AsyncGenerator<string> {
+  const res = await fetch(`${API_URL}?key=${apiKey}&alt=sse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: history,
+      generationConfig: {
+        temperature: 0.85,
+        maxOutputTokens: 4096,
+        thinkingConfig: { thinkingBudget: 0 },
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Gemini API ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  function* parseLines(raw: string) {
+    const lines = raw.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('data: ')) {
+        const data = trimmed.slice(6).trim();
+        if (data === '[DONE]') return;
+        try {
+          const json = JSON.parse(data);
+          const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) yield text;
+        } catch {}
+      }
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lastNewline = buffer.lastIndexOf('\n');
+    if (lastNewline === -1) continue;
+    const complete = buffer.slice(0, lastNewline);
+    buffer = buffer.slice(lastNewline + 1);
+    for (const text of parseLines(complete)) yield text;
+  }
+  if (buffer.trim()) {
+    for (const text of parseLines(buffer)) yield text;
+  }
+}
+
 export async function* streamGemini(
   apiKey: string,
   prompt: string

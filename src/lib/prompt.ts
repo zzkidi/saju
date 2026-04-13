@@ -26,6 +26,54 @@ function getSpecialTags(dayGanzhi: string): string[] {
   return tags;
 }
 
+// 시스템 프롬프트 (대화 전체에 깔리는 컨텍스트)
+export function buildSystemPrompt(
+  saju: SajuResult,
+  astro: AstrologyResult,
+  mbti: MbtiType | null,
+  gender: 'M' | 'F'
+): string {
+  const yearPillar = `${saju.year.ganzhi}(${formatPillarKo(saju.year)})`;
+  const monthPillar = `${saju.month.ganzhi}(${formatPillarKo(saju.month)})`;
+  const dayPillar = `${saju.day.ganzhi}(${formatPillarKo(saju.day)})`;
+  const hourPillar = `${saju.hour.ganzhi}(${formatPillarKo(saju.hour)})`;
+  const specialTags = getSpecialTags(saju.day.ganzhi);
+  const tagsStr = specialTags.length ? specialTags.join(', ') : '해당 없음';
+  const sunSign = SIGN_KOREAN[astro.sun];
+  const moonSign = SIGN_KOREAN[astro.moon];
+  const ascSign = SIGN_KOREAN[astro.ascendant];
+  const mbtiStr = mbti ? `MBTI: ${mbti}` : 'MBTI: 정보 없음';
+  const genderStr = gender === 'F' ? '여성' : '남성';
+
+  const stems = getTodayStems();
+  const tenGodDay = calculateTenGod(saju.day.stem as HeavenlyStem, stems.day);
+  const tenGodYear = calculateTenGod(saju.day.stem as HeavenlyStem, stems.year);
+
+  return `사주명리학·서양 점성술·MBTI를 통합 분석하는 전문 블로거. 사용자의 질문에 아래 데이터를 바탕으로 답변한다.
+
+[사용자 데이터]
+사주: ${yearPillar} / ${monthPillar} / ${dayPillar} / ${hourPillar}
+일주: ${saju.day.ganzhi}(${formatPillarKo(saju.day)}) — ${tagsStr}
+별자리: 태양 ${sunSign} / 달 ${moonSign} / 상승 ${ascSign}
+${mbtiStr} / ${genderStr}
+오늘 일진: ${stems.dayGanzhi}(십성: ${tenGodDay}) / 올해 세운: ${stems.yearGanzhi}(십성: ${tenGodYear})
+
+[톤 — 사주 인기 유튜버/블로거 스타일]
+- 반말. 친구인 척 금지. 잘 아는 전문가가 편하게 설명하는 느낌.
+- 질문 던져서 공감 유도: "혹시 이런 경험 있지 않나?", "보통 이 조합이면 ~하는 편인데, 맞지?"
+- 구체적 장면 묘사: "여행 계획 세울 때 숙소는 꼼꼼히 잡고 현지 가면 동선 다 바꾸는 스타일"
+- 금지: "야 너~", "우리~", "아이고", 존댓말, 아줌마 말투.
+
+[내용 규칙]
+- "사주로는~, 별자리로는~" 나열 금지. 세 체계를 한 흐름으로 녹여.
+- 나쁜 예: "사주로 보면 역마살. 별자리는 사수자리. MBTI는 ISFP."
+- 좋은 예: "역마살에 사수자리까지 겹치니 한곳에 못 붙는 체질인데, ISFP 감성이 더해져서 가는 곳마다 뭔가 느끼고 흡수하는 타입."
+- 한자 금지. 한글 읽기(무신, 병자)로만.
+- 400~600자. 문장 완결 후 마무리.
+- 이모지, 마크다운, 볼드, 별표 전부 금지. 순수 텍스트.`;
+}
+
+// 단일 질문용 프롬프트 (하위 호환)
 export function buildPrompt(
   saju: SajuResult,
   astro: AstrologyResult,

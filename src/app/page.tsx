@@ -11,8 +11,13 @@ import {
   generateAstroPersona,
   generateMbtiPersona,
 } from '@/lib/reading';
-import { buildPrompt } from '@/lib/prompt';
-import { streamGemini, getStoredApiKey, setStoredApiKey } from '@/lib/gemini';
+import { buildSystemPrompt } from '@/lib/prompt';
+import {
+  streamGeminiChat,
+  getStoredApiKey,
+  setStoredApiKey,
+  type GeminiMessage,
+} from '@/lib/gemini';
 import { REGION_MAP, REGIONS, DEFAULT_REGION } from '@/lib/regions';
 import { formatPillarKo } from '@/lib/format';
 import {
@@ -55,9 +60,12 @@ export default function Page() {
   const [savedGender, setSavedGender] = useState<'M' | 'F'>('F');
 
   const [messages, setMessages] = useState<Message[]>([]);
+  const [geminiHistory, setGeminiHistory] = useState<GeminiMessage[]>([]);
+  const [systemPrompt, setSystemPrompt] = useState('');
   const [used, setUsed] = useState<Set<Category>>(new Set());
   const [isTyping, setIsTyping] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // API key
@@ -104,83 +112,41 @@ export default function Page() {
     setStage('result');
     setUsed(new Set());
     setMessages([]);
+    setGeminiHistory([]);
     setBusy(true);
 
-    // 첫 공개 시퀀스
-    await sleep(300);
-    const summary = `운세 뽑았어! 반가워 😌\n\n🔮 일주: ${sajuResult.day.ganzhi}(${formatPillarKo(sajuResult.day)})\n✨ 태양: ${SIGN_KOREAN[astroResult.sun]} ${SIGN_EMOJI[astroResult.sun]}\n🌙 달: ${SIGN_KOREAN[astroResult.moon]} ${SIGN_EMOJI[astroResult.moon]}\n⬆️ 상승: ${SIGN_KOREAN[astroResult.ascendant]} ${SIGN_EMOJI[astroResult.ascendant]}${mbtiVal ? `\n🧠 MBTI: ${mbtiVal}` : ''}`;
+    const sysPrompt = buildSystemPrompt(sajuResult, astroResult, mbtiVal, gender);
+    setSystemPrompt(sysPrompt);
+
+    // 요약 카드
+    const summary = `🔮 ${sajuResult.day.ganzhi}(${formatPillarKo(sajuResult.day)}) 일주\n✨ ${SIGN_KOREAN[astroResult.sun]} ${SIGN_EMOJI[astroResult.sun]} / 🌙 ${SIGN_KOREAN[astroResult.moon]} ${SIGN_EMOJI[astroResult.moon]} / ⬆️ ${SIGN_KOREAN[astroResult.ascendant]} ${SIGN_EMOJI[astroResult.ascendant]}${mbtiVal ? ` / 🧠 ${mbtiVal}` : ''}`;
     setMessages([{ kind: 'system', text: summary }]);
 
-    // 페르소나 종합
-    await sleep(600);
-    setIsTyping(true);
-
-    if (apiKey) {
-      // AI 페르소나 — 타이핑 도트가 첫 글자까지 유지
-      const personaPrompt = buildPrompt(sajuResult, astroResult, mbtiVal, gender, 'overall');
-      try {
-        let firstChunk = true;
-        for await (const chunk of streamGemini(apiKey, personaPrompt)) {
-          if (firstChunk) {
-            setIsTyping(false);
-            setMessages((prev) => [...prev, { kind: 'ai', text: chunk }]);
-            firstChunk = false;
-          } else {
-            setMessages((prev) => {
-              const updated = [...prev];
-              const last = updated[updated.length - 1];
-              updated[updated.length - 1] = { ...last, text: last.text + chunk };
-              return updated;
-            });
-          }
-        }
-        if (firstChunk) {
-          setIsTyping(false);
-          const fallback = generateSajuPersona(sajuResult);
-          setMessages((prev) => [...prev, { kind: 'saju', text: fallback }]);
-        }
-      } catch {
-        setIsTyping(false);
-        const fallback = generateSajuPersona(sajuResult);
-        setMessages((prev) => [...prev, { kind: 'saju', text: fallback }]);
-      }
-    } else {
-      await sleep(800);
-      setIsTyping(false);
-      const sajuP = generateSajuPersona(sajuResult);
-      const astroP = generateAstroPersona(astroResult);
-      let personaText = `🔮 ${sajuP}\n\n✨ ${astroP}`;
-      if (mbtiVal) {
-        personaText += `\n\n🧠 ${generateMbtiPersona(mbtiVal)}`;
-      }
-      setMessages((prev) => [...prev, { kind: 'saju', text: personaText }]);
-    }
-
-    await sleep(500);
-    setMessages((prev) => [
-      ...prev,
-      { kind: 'system', text: '궁금한 카테고리 골라봐 👇' },
-    ]);
+    // 자동으로 총운 분석 요청
+    await sleep(300);
+    await sendMessage('나에 대해 전체적으로 분석해줘', sysPrompt);
     setBusy(false);
   }
 
-  async function handleCategoryClick(cat: Category) {
-    if (!saju || !astro || busy) return;
+  // === 공통 메시지 전송 (카테고리 버튼 + 자유 입력 통합) ===
+  async function sendMessage(userText: string, overrideSystemPrompt?: string) {
+    if (!userText.trim()) return;
     setBusy(true);
 
-    setMessages((prev) => [
-      ...prev,
-      { kind: 'user', text: `${CATEGORY_EMOJI[cat]} ${pick(CATEGORY_PROMPTS[cat])}` },
-    ]);
-    await sleep(400);
+    // 유저 버블
+    setMessages((prev) => [...prev, { kind: 'user', text: userText }]);
+
+    const newUserMsg: GeminiMessage = { role: 'user', parts: [{ text: userText }] };
+    const updatedHistory = [...geminiHistory, newUserMsg];
 
     if (apiKey) {
-      // AI 종합 해석 — 타이핑 도트가 첫 글자까지 유지
       setIsTyping(true);
-      const prompt = buildPrompt(saju, astro, savedMbti, savedGender, cat);
+      const sp = overrideSystemPrompt || systemPrompt;
       try {
+        let responseText = '';
         let firstChunk = true;
-        for await (const chunk of streamGemini(apiKey, prompt)) {
+        for await (const chunk of streamGeminiChat(apiKey, sp, updatedHistory)) {
+          responseText += chunk;
           if (firstChunk) {
             setIsTyping(false);
             setMessages((prev) => [...prev, { kind: 'ai', text: chunk }]);
@@ -196,32 +162,41 @@ export default function Page() {
         }
         if (firstChunk) {
           setIsTyping(false);
-          setMessages((prev) => [...prev, { kind: 'ai', text: '(응답 없음 — 다시 시도해봐)' }]);
+          setMessages((prev) => [...prev, { kind: 'ai', text: '(응답 없음)' }]);
         }
+        // 히스토리 업데이트
+        const aiMsg: GeminiMessage = { role: 'model', parts: [{ text: responseText }] };
+        setGeminiHistory([...updatedHistory, aiMsg]);
       } catch {
         setIsTyping(false);
-        const fallbackSaju = generateSajuReading(saju, cat);
-        const fallbackAstro = generateAstroReading(astro, cat);
-        setMessages((prev) => [
-          ...prev,
-          { kind: 'saju', text: `(AI 연결 실패)\n\n🔮 ${fallbackSaju}\n\n✨ ${fallbackAstro}` },
-        ]);
+        setMessages((prev) => [...prev, { kind: 'ai', text: '(AI 연결 실패 — 다시 시도해봐)' }]);
+        setGeminiHistory(updatedHistory);
       }
     } else {
-      // 정적 fallback
+      // 정적 fallback (API 키 없을 때)
       setIsTyping(true);
       await sleep(800);
       setIsTyping(false);
-      const sajuText = generateSajuReading(saju, cat);
-      const astroText = generateAstroReading(astro, cat);
-      setMessages((prev) => [
-        ...prev,
-        { kind: 'saju', text: `🔮 ${sajuText}\n\n✨ ${astroText}` },
-      ]);
+      if (saju && astro) {
+        const sajuP = generateSajuPersona(saju);
+        setMessages((prev) => [...prev, { kind: 'saju', text: sajuP }]);
+      }
     }
-
-    setUsed((prev) => new Set(prev).add(cat));
     setBusy(false);
+  }
+
+  function handleCategoryClick(cat: Category) {
+    if (busy) return;
+    setUsed((prev) => new Set(prev).add(cat));
+    sendMessage(`${CATEGORY_LABELS[cat]} 분석해줘`);
+  }
+
+  function handleChatSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!chatInput.trim() || busy) return;
+    const text = chatInput.trim();
+    setChatInput('');
+    sendMessage(text);
   }
 
   function handleReset() {
@@ -230,9 +205,12 @@ export default function Page() {
     setAstro(null);
     setSavedMbti(null);
     setMessages([]);
+    setGeminiHistory([]);
+    setSystemPrompt('');
     setUsed(new Set());
     setIsTyping(false);
     setBusy(false);
+    setChatInput('');
   }
 
   if (stage === 'input') {
@@ -554,10 +532,11 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Category buttons */}
-      <div className="fixed bottom-0 left-0 right-0 border-t border-purple-100 bg-white/95 px-4 py-3 backdrop-blur">
+      {/* Bottom bar: category chips + text input */}
+      <div className="fixed bottom-0 left-0 right-0 border-t border-purple-100 bg-white/95 px-4 pb-[env(safe-area-inset-bottom)] backdrop-blur">
         <div className="mx-auto max-w-md">
-          <div className="grid grid-cols-5 gap-1.5">
+          {/* 카테고리 가로 스크롤 */}
+          <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 py-2 scrollbar-hide">
             {CATEGORY_ORDER.map((cat) => {
               const isUsed = used.has(cat);
               return (
@@ -565,18 +544,36 @@ export default function Page() {
                   key={cat}
                   onClick={() => handleCategoryClick(cat)}
                   disabled={busy}
-                  className={`flex flex-col items-center gap-0.5 rounded-2xl py-2 text-[10px] font-bold transition active:scale-95 disabled:opacity-50 ${
+                  className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-bold transition active:scale-95 disabled:opacity-50 ${
                     isUsed
                       ? 'bg-purple-50 text-purple-400'
-                      : 'bg-gradient-to-b from-purple-100 to-pink-100 text-purple-800'
+                      : 'bg-gradient-to-r from-purple-100 to-pink-100 text-purple-800'
                   }`}
                 >
-                  <span className="text-base">{CATEGORY_EMOJI[cat]}</span>
+                  <span>{CATEGORY_EMOJI[cat]}</span>
                   <span>{CATEGORY_LABELS[cat]}</span>
                 </button>
               );
             })}
           </div>
+          {/* 자유 텍스트 입력 */}
+          <form onSubmit={handleChatSubmit} className="flex gap-2 pb-2">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="추가로 궁금한 거 물어봐..."
+              disabled={busy}
+              className="min-w-0 flex-1 rounded-full border border-purple-100 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder-purple-300 focus:border-purple-400 focus:outline-none disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={busy || !chatInput.trim()}
+              className="shrink-0 rounded-full bg-gradient-to-r from-purple-600 to-pink-500 px-4 py-2.5 text-sm font-bold text-white shadow-md active:scale-95 disabled:opacity-40"
+            >
+              전송
+            </button>
+          </form>
         </div>
       </div>
     </main>
