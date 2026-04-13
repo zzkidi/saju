@@ -11,8 +11,8 @@ export async function* streamGemini(
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 0.9,
-        maxOutputTokens: 1024,
+        temperature: 0.85,
+        maxOutputTokens: 2048,
       },
     }),
   });
