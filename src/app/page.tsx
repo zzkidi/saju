@@ -11,6 +11,8 @@ import {
   generateAstroPersona,
   generateMbtiPersona,
 } from '@/lib/reading';
+import { buildPrompt } from '@/lib/prompt';
+import { streamGemini, getStoredApiKey, setStoredApiKey } from '@/lib/gemini';
 import { REGION_MAP, REGIONS, DEFAULT_REGION } from '@/lib/regions';
 import { formatPillarKo } from '@/lib/format';
 import {
@@ -28,19 +30,8 @@ import {
   type MbtiVariant,
 } from '@/lib/types';
 
-type MessageKind = 'user' | 'saju' | 'astro' | 'mbti' | 'system';
+type MessageKind = 'user' | 'ai' | 'saju' | 'astro' | 'mbti' | 'system';
 type Message = { kind: MessageKind; text: string };
-
-const INTRO_SAJU = [
-  '🔮 사주부터 한번 볼까...',
-  '🔮 잠깐, 사주 먼저 풀어볼게',
-  '🔮 사주로 보면 말이야...',
-];
-const BRIDGE_ASTRO = [
-  '✨ 그리고 별자리로는 이렇게 보여',
-  '✨ 별자리 쪽도 한번 볼까?',
-  '✨ 점성술 관점에서도 재밌는 게 나오는데',
-];
 
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -61,6 +52,7 @@ export default function Page() {
   const [saju, setSaju] = useState<SajuResult | null>(null);
   const [astro, setAstro] = useState<AstrologyResult | null>(null);
   const [savedMbti, setSavedMbti] = useState<MbtiType | null>(null);
+  const [savedGender, setSavedGender] = useState<'M' | 'F'>('F');
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [used, setUsed] = useState<Set<Category>>(new Set());
@@ -68,9 +60,29 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // API key
+  const [apiKey, setApiKey] = useState<string>('');
+  const [keyInput, setKeyInput] = useState('');
+  const [showKeyInput, setShowKeyInput] = useState(false);
+
+  useEffect(() => {
+    const k = getStoredApiKey();
+    if (k) setApiKey(k);
+  }, []);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
+
+  function handleSaveKey() {
+    const trimmed = keyInput.trim();
+    if (trimmed) {
+      setStoredApiKey(trimmed);
+      setApiKey(trimmed);
+      setKeyInput('');
+      setShowKeyInput(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -88,64 +100,61 @@ export default function Page() {
     setSaju(sajuResult);
     setAstro(astroResult);
     setSavedMbti(mbtiVal);
+    setSavedGender(gender);
     setStage('result');
     setUsed(new Set());
     setMessages([]);
     setBusy(true);
 
-    // === 첫 공개 시퀀스 ===
+    // 첫 공개 시퀀스
     await sleep(300);
-    const summary = `운세 뽑았어! 반가워 😌\n\n🔮 사주 일간: ${STEM_KOREAN[sajuResult.day.stem]}${STEM_WUXING[sajuResult.day.stem]}(${sajuResult.day.stem})\n✨ 태양: ${SIGN_KOREAN[astroResult.sun]} ${SIGN_EMOJI[astroResult.sun]}\n🌙 달: ${SIGN_KOREAN[astroResult.moon]} ${SIGN_EMOJI[astroResult.moon]}\n⬆️ 상승: ${SIGN_KOREAN[astroResult.ascendant]} ${SIGN_EMOJI[astroResult.ascendant]}${mbtiVal ? `\n🧠 MBTI: ${mbtiVal}` : ''}`;
-    setMessages([{ kind: 'saju', text: summary }]);
+    const summary = `운세 뽑았어! 반가워 😌\n\n🔮 일주: ${sajuResult.day.ganzhi}(${formatPillarKo(sajuResult.day)})\n✨ 태양: ${SIGN_KOREAN[astroResult.sun]} ${SIGN_EMOJI[astroResult.sun]}\n🌙 달: ${SIGN_KOREAN[astroResult.moon]} ${SIGN_EMOJI[astroResult.moon]}\n⬆️ 상승: ${SIGN_KOREAN[astroResult.ascendant]} ${SIGN_EMOJI[astroResult.ascendant]}${mbtiVal ? `\n🧠 MBTI: ${mbtiVal}` : ''}`;
+    setMessages([{ kind: 'system', text: summary }]);
 
-    await sleep(800);
+    // 페르소나 종합
+    await sleep(600);
     setIsTyping(true);
-    await sleep(1000);
-    setIsTyping(false);
-    const sajuPersona = generateSajuPersona(sajuResult);
-    setMessages((prev) => [
-      ...prev,
-      {
-        kind: 'saju',
-        text: `🔮 사주로 본 너라는 사람\n\n${sajuPersona}`,
-      },
-    ]);
 
-    await sleep(900);
-    setIsTyping(true);
-    await sleep(1000);
-    setIsTyping(false);
-    const astroPersona = generateAstroPersona(astroResult);
-    setMessages((prev) => [
-      ...prev,
-      {
-        kind: 'astro',
-        text: `✨ 별자리로 본 너의 분위기\n\n${astroPersona}`,
-      },
-    ]);
-
-    if (mbtiVal) {
-      await sleep(900);
-      setIsTyping(true);
-      await sleep(1000);
+    if (apiKey) {
+      // AI 페르소나
+      const personaPrompt = buildPrompt(sajuResult, astroResult, mbtiVal, gender, 'overall');
+      const personaMsg: Message = { kind: 'ai', text: '' };
       setIsTyping(false);
-      const mbtiPersona = generateMbtiPersona(mbtiVal);
-      setMessages((prev) => [
-        ...prev,
-        {
-          kind: 'mbti',
-          text: `🧠 MBTI ${mbtiVal}로 본 너\n\n${mbtiPersona}`,
-        },
-      ]);
+      setMessages((prev) => [...prev, personaMsg]);
+      try {
+        for await (const chunk of streamGemini(apiKey, personaPrompt)) {
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            updated[updated.length - 1] = { ...last, text: last.text + chunk };
+            return updated;
+          });
+        }
+      } catch {
+        // fallback
+        const fallback = generateSajuPersona(sajuResult);
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { kind: 'saju', text: fallback };
+          return updated;
+        });
+      }
+    } else {
+      await sleep(800);
+      setIsTyping(false);
+      const sajuP = generateSajuPersona(sajuResult);
+      const astroP = generateAstroPersona(astroResult);
+      let personaText = `🔮 ${sajuP}\n\n✨ ${astroP}`;
+      if (mbtiVal) {
+        personaText += `\n\n🧠 ${generateMbtiPersona(mbtiVal)}`;
+      }
+      setMessages((prev) => [...prev, { kind: 'saju', text: personaText }]);
     }
 
-    await sleep(700);
+    await sleep(500);
     setMessages((prev) => [
       ...prev,
-      {
-        kind: 'system',
-        text: '이제 궁금한 카테고리 골라봐 👇',
-      },
+      { kind: 'system', text: '궁금한 카테고리 골라봐 👇' },
     ]);
     setBusy(false);
   }
@@ -154,41 +163,54 @@ export default function Page() {
     if (!saju || !astro || busy) return;
     setBusy(true);
 
-    // 1. user bubble
     setMessages((prev) => [
       ...prev,
       { kind: 'user', text: `${CATEGORY_EMOJI[cat]} ${pick(CATEGORY_PROMPTS[cat])}` },
     ]);
-    await sleep(500);
+    await sleep(400);
 
-    // 2. saju intro
-    setIsTyping(true);
-    await sleep(800);
-    setIsTyping(false);
-    setMessages((prev) => [...prev, { kind: 'saju', text: pick(INTRO_SAJU) }]);
-    await sleep(600);
-
-    // 3. saju reading
-    setIsTyping(true);
-    await sleep(1000);
-    setIsTyping(false);
-    const sajuText = generateSajuReading(saju, cat);
-    setMessages((prev) => [...prev, { kind: 'saju', text: sajuText }]);
-    await sleep(700);
-
-    // 4. bridge to astro
-    setIsTyping(true);
-    await sleep(700);
-    setIsTyping(false);
-    setMessages((prev) => [...prev, { kind: 'astro', text: pick(BRIDGE_ASTRO) }]);
-    await sleep(600);
-
-    // 5. astro reading
-    setIsTyping(true);
-    await sleep(1000);
-    setIsTyping(false);
-    const astroText = generateAstroReading(astro, cat);
-    setMessages((prev) => [...prev, { kind: 'astro', text: astroText }]);
+    if (apiKey) {
+      // AI 종합 해석
+      setIsTyping(true);
+      await sleep(500);
+      setIsTyping(false);
+      const prompt = buildPrompt(saju, astro, savedMbti, savedGender, cat);
+      const aiMsg: Message = { kind: 'ai', text: '' };
+      setMessages((prev) => [...prev, aiMsg]);
+      try {
+        for await (const chunk of streamGemini(apiKey, prompt)) {
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            updated[updated.length - 1] = { ...last, text: last.text + chunk };
+            return updated;
+          });
+        }
+      } catch (err) {
+        // fallback to static
+        const fallbackSaju = generateSajuReading(saju, cat);
+        const fallbackAstro = generateAstroReading(astro, cat);
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            kind: 'saju',
+            text: `(AI 연결 실패, 기본 해석)\n\n🔮 ${fallbackSaju}\n\n✨ ${fallbackAstro}`,
+          };
+          return updated;
+        });
+      }
+    } else {
+      // 정적 fallback
+      setIsTyping(true);
+      await sleep(800);
+      setIsTyping(false);
+      const sajuText = generateSajuReading(saju, cat);
+      const astroText = generateAstroReading(astro, cat);
+      setMessages((prev) => [
+        ...prev,
+        { kind: 'saju', text: `🔮 ${sajuText}\n\n✨ ${astroText}` },
+      ]);
+    }
 
     setUsed((prev) => new Set(prev).add(cat));
     setBusy(false);
@@ -203,7 +225,6 @@ export default function Page() {
     setUsed(new Set());
     setIsTyping(false);
     setBusy(false);
-    // 입력 값은 유지 (MBTI/지역 계속 쓰게)
   }
 
   if (stage === 'input') {
@@ -214,7 +235,7 @@ export default function Page() {
             <div className="mb-3 text-5xl">🔮✨</div>
             <h1 className="text-3xl font-extrabold text-purple-900">사주 &amp; 별자리</h1>
             <p className="mt-2 text-sm text-purple-600">
-              생년월일시 하나로 사주 + 점성술 + MBTI 종합 해석
+              사주 + 점성술 + MBTI 종합 해석
             </p>
           </div>
 
@@ -249,60 +270,49 @@ export default function Page() {
                 className="block w-full min-w-0 max-w-full appearance-none rounded-2xl border border-purple-100 bg-white px-4 py-3 text-base text-gray-800 focus:border-purple-400 focus:outline-none"
               />
               <p className="mt-1 text-[11px] text-purple-400">
-                시간 모르면 12:00 근처로 넣어봐 (시주·상승궁 정확도는 떨어짐)
+                시간 모르면 12:00 근처로 넣어봐
               </p>
             </div>
 
             <div>
               <label className="mb-2 block text-xs font-semibold text-purple-700">성별</label>
               <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setGender('F')}
-                  className={`flex-1 rounded-2xl py-3 text-sm font-bold transition active:scale-95 ${
-                    gender === 'F'
-                      ? 'bg-pink-400 text-white shadow-md'
-                      : 'bg-gray-100 text-gray-500'
-                  }`}
-                >
-                  여성
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGender('M')}
-                  className={`flex-1 rounded-2xl py-3 text-sm font-bold transition active:scale-95 ${
-                    gender === 'M'
-                      ? 'bg-blue-400 text-white shadow-md'
-                      : 'bg-gray-100 text-gray-500'
-                  }`}
-                >
-                  남성
-                </button>
+                {(['F', 'M'] as const).map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setGender(g)}
+                    className={`flex-1 rounded-2xl py-3 text-sm font-bold transition active:scale-95 ${
+                      gender === g
+                        ? g === 'F'
+                          ? 'bg-pink-400 text-white shadow-md'
+                          : 'bg-blue-400 text-white shadow-md'
+                        : 'bg-gray-100 text-gray-500'
+                    }`}
+                  >
+                    {g === 'F' ? '여성' : '남성'}
+                  </button>
+                ))}
               </div>
             </div>
 
             <div>
-              <label className="mb-2 block text-xs font-semibold text-purple-700">
-                출생 지역 <span className="text-purple-400">(보정 + 상승궁)</span>
-              </label>
+              <label className="mb-2 block text-xs font-semibold text-purple-700">출생 지역</label>
               <div className="grid grid-cols-3 gap-2">
-                {REGIONS.map((r) => {
-                  const active = region === r.name;
-                  return (
-                    <button
-                      key={r.name}
-                      type="button"
-                      onClick={() => setRegion(r.name)}
-                      className={`rounded-2xl py-2.5 text-xs font-bold transition active:scale-95 ${
-                        active
-                          ? 'bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-md'
-                          : 'bg-purple-50 text-purple-600'
-                      }`}
-                    >
-                      {r.name}
-                    </button>
-                  );
-                })}
+                {REGIONS.map((r) => (
+                  <button
+                    key={r.name}
+                    type="button"
+                    onClick={() => setRegion(r.name)}
+                    className={`rounded-2xl py-2.5 text-xs font-bold transition active:scale-95 ${
+                      region === r.name
+                        ? 'bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-md'
+                        : 'bg-purple-50 text-purple-600'
+                    }`}
+                  >
+                    {r.name}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -346,45 +356,71 @@ export default function Page() {
                   });
                 })}
               </div>
+              {mbtiBase && (
+                <div className="mt-2 flex gap-2">
+                  {(['A', 'T'] as const).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setMbtiVariant(v)}
+                      className={`flex-1 rounded-2xl py-2.5 text-xs font-bold transition active:scale-95 ${
+                        mbtiVariant === v
+                          ? 'bg-gradient-to-br from-pink-500 to-rose-500 text-white shadow-md'
+                          : 'bg-pink-50 text-pink-500'
+                      }`}
+                    >
+                      -{v} {v === 'A' ? '확신형' : '신중형'}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="mt-1 text-[11px] text-purple-400">
+                {mbtiBase ? `선택: ${mbtiBase}-${mbtiVariant}` : 'MBTI 모르면 비우고 넘어가도 돼요'}
+              </p>
+            </div>
 
-              <div className="mt-2">
-                <div className="mb-1 text-[10px] font-semibold text-purple-400">
-                  변형 (A: 확신형 / T: 신중형)
+            {/* AI 키 설정 */}
+            <div className="rounded-2xl bg-purple-50/60 p-3">
+              {apiKey ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-emerald-600">
+                    ✓ AI 종합 해석 활성
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowKeyInput(!showKeyInput)}
+                    className="text-[10px] text-purple-400 underline"
+                  >
+                    키 변경
+                  </button>
                 </div>
-                <div className="flex gap-2">
-                  {(['A', 'T'] as const).map((v) => {
-                    const active = mbtiVariant === v;
-                    const disabled = !mbtiBase;
-                    return (
-                      <button
-                        key={v}
-                        type="button"
-                        disabled={disabled}
-                        onClick={() => setMbtiVariant(v)}
-                        className={`flex-1 rounded-2xl py-2.5 text-xs font-bold transition active:scale-95 ${
-                          disabled
-                            ? 'bg-gray-50 text-gray-300'
-                            : active
-                            ? 'bg-gradient-to-br from-pink-500 to-rose-500 text-white shadow-md'
-                            : 'bg-pink-50 text-pink-500'
-                        }`}
-                      >
-                        -{v} {v === 'A' ? '확신형' : '신중형'}
-                      </button>
-                    );
-                  })}
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowKeyInput(true)}
+                  className="w-full text-left text-xs font-semibold text-purple-500"
+                >
+                  🔑 AI 종합 해석 키 입력 (Gemini 무료)
+                </button>
+              )}
+              {showKeyInput && (
+                <div className="mt-2 flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Gemini API Key"
+                    value={keyInput}
+                    onChange={(e) => setKeyInput(e.target.value)}
+                    className="min-w-0 flex-1 rounded-xl border border-purple-200 bg-white px-3 py-2 text-xs focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveKey}
+                    className="rounded-xl bg-purple-600 px-3 py-2 text-xs font-bold text-white"
+                  >
+                    저장
+                  </button>
                 </div>
-                {mbtiBase && (
-                  <p className="mt-1 text-[11px] text-purple-500">
-                    선택됨: <b>{mbtiBase}-{mbtiVariant}</b>
-                  </p>
-                )}
-                {!mbtiBase && (
-                  <p className="mt-1 text-[11px] text-purple-400">
-                    MBTI 모르면 그냥 비우고 넘어가도 돼요
-                  </p>
-                )}
-              </div>
+              )}
             </div>
 
             <button
@@ -406,13 +442,13 @@ export default function Page() {
 
   return (
     <main className="flex min-h-screen flex-col bg-gradient-to-b from-purple-100 via-pink-50 to-amber-50">
-      {/* Top summary card */}
-      <div className="sticky top-0 z-10 border-b border-purple-100 bg-white/90 px-5 pt-3 pb-3 backdrop-blur">
+      {/* Top card */}
+      <div className="sticky top-0 z-10 border-b border-purple-100 bg-white/90 px-4 pt-3 pb-3 backdrop-blur">
         <div className="mx-auto max-w-md">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-xs font-bold text-purple-500">
-              나의 사주 + 별자리
-              {savedMbti && <span className="ml-1 text-pink-500">+ {savedMbti}</span>}
+              {saju?.day.ganzhi}({formatPillarKo(saju!.day)}) 일주
+              {savedMbti && <span className="ml-1 text-pink-500">· {savedMbti}</span>}
             </h2>
             <button
               onClick={handleReset}
@@ -436,7 +472,7 @@ export default function Page() {
                   className="rounded-xl bg-gradient-to-b from-purple-50 to-pink-50 p-1.5 text-center ring-1 ring-purple-100"
                 >
                   <div className="text-[9px] font-semibold text-purple-400">{label}주</div>
-                  <div className="text-base font-extrabold text-purple-900 leading-tight">
+                  <div className="text-base font-extrabold leading-tight text-purple-900">
                     {p.ganzhi}
                   </div>
                   <div className="text-[9px] text-purple-500">{formatPillarKo(p)}</div>
@@ -448,9 +484,9 @@ export default function Page() {
           {astro && (
             <div className="mt-1.5 grid grid-cols-3 gap-1.5">
               {[
-                { label: '해(자아)', sign: astro.sun },
-                { label: '달(감정)', sign: astro.moon },
-                { label: '상승(인상)', sign: astro.ascendant },
+                { label: '해', sign: astro.sun },
+                { label: '달', sign: astro.moon },
+                { label: '상승', sign: astro.ascendant },
               ].map(({ label, sign }) => (
                 <div
                   key={label}
@@ -470,8 +506,8 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Chat area */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 pb-40">
+      {/* Chat */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-40">
         <div className="mx-auto max-w-md space-y-3">
           {messages.map((m, i) => {
             if (m.kind === 'user') {
@@ -486,24 +522,24 @@ export default function Page() {
             if (m.kind === 'system') {
               return (
                 <div key={i} className="flex justify-center">
-                  <div className="max-w-[90%] rounded-full bg-purple-50 px-4 py-1.5 text-[11px] font-semibold text-purple-500">
+                  <div className="max-w-[90%] whitespace-pre-wrap rounded-2xl bg-purple-50 px-4 py-2 text-center text-[11px] font-semibold leading-relaxed text-purple-600">
                     {m.text}
                   </div>
                 </div>
               );
             }
-            const bubbleClass =
-              m.kind === 'saju'
-                ? 'bg-white text-gray-800 ring-purple-100'
-                : m.kind === 'astro'
-                ? 'bg-gradient-to-br from-pink-50 to-amber-50 text-gray-800 ring-pink-100'
-                : 'bg-gradient-to-br from-blue-50 to-cyan-50 text-gray-800 ring-blue-100';
+            // ai, saju, astro, mbti — all left-aligned bot bubbles
+            const isAi = m.kind === 'ai';
             return (
               <div key={i} className="flex justify-start">
                 <div
-                  className={`max-w-[88%] whitespace-pre-wrap rounded-3xl px-4 py-3 text-sm leading-relaxed shadow-sm ring-1 ${bubbleClass}`}
+                  className={`max-w-[90%] whitespace-pre-wrap rounded-3xl px-4 py-3 text-sm leading-relaxed shadow-sm ring-1 ${
+                    isAi
+                      ? 'bg-gradient-to-br from-white to-purple-50 text-gray-800 ring-purple-200'
+                      : 'bg-white text-gray-800 ring-purple-100'
+                  }`}
                 >
-                  {m.text}
+                  {m.text || (isAi ? '...' : '')}
                 </div>
               </div>
             );
@@ -512,9 +548,9 @@ export default function Page() {
             <div className="flex justify-start">
               <div className="rounded-3xl bg-white px-4 py-3 shadow-sm ring-1 ring-purple-100">
                 <div className="flex gap-1">
-                  <span className="h-2 w-2 animate-bounce rounded-full bg-purple-300 [animation-delay:-0.3s]"></span>
-                  <span className="h-2 w-2 animate-bounce rounded-full bg-purple-300 [animation-delay:-0.15s]"></span>
-                  <span className="h-2 w-2 animate-bounce rounded-full bg-purple-300"></span>
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-purple-300 [animation-delay:-0.3s]" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-purple-300 [animation-delay:-0.15s]" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-purple-300" />
                 </div>
               </div>
             </div>
