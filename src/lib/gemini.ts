@@ -1,5 +1,5 @@
 const API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent';
 
 export async function* streamGemini(
   apiKey: string,
