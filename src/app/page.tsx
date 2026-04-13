@@ -379,49 +379,36 @@ export default function Page() {
               </p>
             </div>
 
-            {/* AI 키 설정 */}
-            <div className="rounded-2xl bg-purple-50/60 p-3">
-              {apiKey ? (
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-emerald-600">
-                    ✓ AI 종합 해석 활성
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowKeyInput(!showKeyInput)}
-                    className="text-[10px] text-purple-400 underline"
-                  >
-                    키 변경
-                  </button>
-                </div>
-              ) : (
+            {/* AI 키 설정 — 빌드 키 있으면 숨김 */}
+            {!apiKey && (
+              <div className="rounded-2xl bg-purple-50/60 p-3">
                 <button
                   type="button"
                   onClick={() => setShowKeyInput(true)}
                   className="w-full text-left text-xs font-semibold text-purple-500"
                 >
-                  🔑 AI 종합 해석 키 입력 (Gemini 무료)
+                  🔑 AI 종합 해석 키 직접 입력 (선택)
                 </button>
-              )}
-              {showKeyInput && (
-                <div className="mt-2 flex gap-2">
-                  <input
-                    type="password"
-                    placeholder="Gemini API Key"
-                    value={keyInput}
-                    onChange={(e) => setKeyInput(e.target.value)}
-                    className="min-w-0 flex-1 rounded-xl border border-purple-200 bg-white px-3 py-2 text-xs focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSaveKey}
-                    className="rounded-xl bg-purple-600 px-3 py-2 text-xs font-bold text-white"
-                  >
-                    저장
-                  </button>
-                </div>
-              )}
-            </div>
+                {showKeyInput && (
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      type="password"
+                      placeholder="Gemini API Key"
+                      value={keyInput}
+                      onChange={(e) => setKeyInput(e.target.value)}
+                      className="min-w-0 flex-1 rounded-xl border border-purple-200 bg-white px-3 py-2 text-xs focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveKey}
+                      className="rounded-xl bg-purple-600 px-3 py-2 text-xs font-bold text-white"
+                    >
+                      저장
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <button
               type="submit"

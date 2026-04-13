@@ -35,6 +35,8 @@ jobs:
 
       - name: Build Next.js
         run: npm run build
+        env:
+          NEXT_PUBLIC_GEMINI_KEY: ${{ secrets.NEXT_PUBLIC_GEMINI_KEY }}
 
       - name: Disable Jekyll
         run: touch ./out/.nojekyll

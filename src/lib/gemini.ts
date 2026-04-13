@@ -50,7 +50,11 @@ export async function* streamGemini(
   }
 }
 
+// 빌드 시 주입된 키 우선, 없으면 localStorage fallback
+const BUILT_IN_KEY = process.env.NEXT_PUBLIC_GEMINI_KEY ?? '';
+
 export function getStoredApiKey(): string | null {
+  if (BUILT_IN_KEY) return BUILT_IN_KEY;
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('gemini_api_key');
 }
